@@ -530,10 +530,13 @@
     ctx.restore();
   }
 
-  // Power-downs spawn 1.5x as often as power-ups: each bad type carries
-  // 1.5x the pick weight of a good one in the shared pickup pool.
+  // Power-ups and power-downs spawn equally often overall (50/50 by
+  // category), regardless of how many types are in each — each type's
+  // weight is normalized by its category size so the categories balance.
+  const GOOD_TYPE_COUNT = PICKUP_TYPES.filter((t) => t.good).length;
+  const BAD_TYPE_COUNT = PICKUP_TYPES.length - GOOD_TYPE_COUNT;
   function pickPickupType() {
-    const weights = PICKUP_TYPES.map((t) => (t.good ? 1 : 1.5));
+    const weights = PICKUP_TYPES.map((t) => (t.good ? 1 / GOOD_TYPE_COUNT : 1 / BAD_TYPE_COUNT));
     const total = weights.reduce((a, b) => a + b, 0);
     let r = rand(0, total);
     for (let i = 0; i < PICKUP_TYPES.length; i++) {
@@ -555,6 +558,7 @@
       this.bob = rand(0, Math.PI * 2);
       this.spin = rand(0, Math.PI * 2);
       this.spinDir = type.good ? 1 : -1;
+      this.collected = false;
     }
 
     update(dt) {
@@ -563,12 +567,19 @@
       this.spin += dt * this.spinDir * 0.8;
     }
 
+    // Power-ups still fade out on their own after a while. Power-downs
+    // never expire on a timer — they linger in the water as a growing
+    // hazard until the fish actually grabs a power-up, which sweeps them
+    // all away (or the fish blunders into one directly).
     get expired() {
-      return this.age > this.lifespan;
+      if (this.collected) return true;
+      return this.type.good && this.age > this.lifespan;
     }
 
     draw(ctx) {
-      const fade = this.age > this.lifespan - 2 ? Math.max(0, (this.lifespan - this.age) / 2) : 1;
+      const fade = this.type.good && this.age > this.lifespan - 2
+        ? Math.max(0, (this.lifespan - this.age) / 2)
+        : 1;
       const yOff = Math.sin(this.bob) * 4;
       const pulse = 1 + Math.sin(this.bob * 1.3) * 0.08;
       const cx = this.x;
@@ -693,7 +704,10 @@
         y = rand(pad, H - pad);
         tries++;
       }
-      const timeLimit = clamp(7.5 - this.level * 0.3, 3, 7.5);
+      // Pearls start out forgiving, then ramp up faster and faster —
+      // the quadratic term barely matters early but dominates late.
+      const lvl = this.level;
+      const timeLimit = clamp(7.5 - lvl * 0.25 - lvl * lvl * 0.015, 2.5, 7.5);
       this.objective = new Objective(x, y, timeLimit);
     }
 
@@ -890,7 +904,18 @@
         pickup.update(dt);
         if (pickup.collides(this.fish)) {
           this.applyPickup(pickup.type);
-          pickup.age = pickup.lifespan + 1; // mark for removal
+          pickup.collected = true;
+          if (pickup.type.good) {
+            // grabbing a power-up sweeps away any power-downs lurking on screen
+            let cleared = false;
+            for (const other of this.pickups) {
+              if (!other.type.good && !other.collected) {
+                other.collected = true;
+                cleared = true;
+              }
+            }
+            if (cleared) this.addPopup(this.fish.x, this.fish.y - 24, 'Cleared!', '#6dffb0');
+          }
         }
       }
       this.pickups = this.pickups.filter((p) => !p.expired);
