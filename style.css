@@ -74,7 +74,7 @@ canvas {
   padding: 20px;
 }
 
-.screen.hidden {
+.hidden {
   display: none;
 }
 

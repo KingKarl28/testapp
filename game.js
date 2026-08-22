@@ -637,15 +637,15 @@
   }
 
   /* ---------------------------- Game ---------------------------------- */
-  // Power-downs last 3x as long as power-ups, so a single mistake really
-  // costs you while the helpful effects stay short bursts.
+  // Power-downs last noticeably longer than power-ups, so a single
+  // mistake really costs you while the helpful effects stay short bursts.
   const EFFECT_DURATIONS = {
     shield: 5,
     slowmo: 6,
     speedBoost: 6,
-    controlsReversed: 15,
-    slowed: 15,
-    ink: 15,
+    controlsReversed: 10,
+    slowed: 10,
+    ink: 10,
   };
 
   class Game {
@@ -878,7 +878,7 @@
           this.streak = 0;
           this.combo = 1;
           this.pearlMisses += 1;
-          if (this.pearlMisses >= 3) {
+          if (this.pearlMisses >= 2) {
             this.deathReason = 'exhausted';
             this.endGame();
             return;
@@ -897,7 +897,7 @@
       this.pickupTimer -= dt;
       if (this.pickupTimer <= 0) {
         this.pickupTimer = rand(3.5, 6);
-        if (this.pickups.length < 5) this.pickups.push(new Pickup());
+        this.pickups.push(new Pickup());
       }
 
       for (const pickup of this.pickups) {
@@ -979,7 +979,7 @@
       highScoreEl.textContent = getHighScore();
       levelEl.textContent = this.level;
       if (streakEl) streakEl.textContent = `${this.streak} (x${this.combo.toFixed(1)})`;
-      if (missesEl) missesEl.textContent = `${this.pearlMisses}/3`;
+      if (missesEl) missesEl.textContent = `${this.pearlMisses}/2`;
 
       effectsEl.innerHTML = '';
       const labels = {
