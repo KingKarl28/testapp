@@ -1,0 +1,120 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at center, #0a4d68 0%, #032f45 60%, #011a28 100%);
+  font-family: "Segoe UI", Verdana, sans-serif;
+  color: #eaf6ff;
+}
+
+#game-wrap {
+  position: relative;
+  width: 800px;
+  max-width: 100vw;
+}
+
+#hud {
+  display: flex;
+  gap: 24px;
+  justify-content: center;
+  padding: 8px 0;
+  font-size: 18px;
+  font-weight: 600;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+}
+
+#active-effects {
+  position: absolute;
+  top: 46px;
+  left: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  z-index: 5;
+  pointer-events: none;
+}
+
+#active-effects .effect-badge {
+  padding: 3px 8px;
+  border-radius: 10px;
+  background: rgba(0,0,0,0.45);
+  border: 1px solid rgba(255,255,255,0.25);
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  background: linear-gradient(180deg, #146a8c 0%, #0d4f6b 55%, #093a52 100%);
+  border-radius: 8px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+  touch-action: none;
+}
+
+.screen {
+  position: absolute;
+  inset: 0;
+  top: 46px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(1, 20, 30, 0.78);
+  border-radius: 8px;
+  text-align: center;
+  padding: 20px;
+}
+
+.screen.hidden {
+  display: none;
+}
+
+.screen h1 {
+  margin: 0 0 4px 0;
+  font-size: 42px;
+  text-shadow: 0 2px 6px rgba(0,0,0,0.6);
+}
+
+.hint {
+  opacity: 0.8;
+  font-size: 14px;
+}
+
+.good { color: #6dffb0; font-weight: 700; }
+.bad { color: #ff7b7b; font-weight: 700; }
+
+.new-high {
+  color: #ffd76d;
+  font-weight: 700;
+  font-size: 18px;
+}
+
+button {
+  margin-top: 12px;
+  padding: 12px 28px;
+  font-size: 18px;
+  font-weight: 700;
+  border: none;
+  border-radius: 30px;
+  background: linear-gradient(180deg, #4fd6ff, #1b9dd9);
+  color: #012;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+}
+
+button:hover {
+  filter: brightness(1.08);
+}
+
+button:active {
+  transform: translateY(1px);
+}

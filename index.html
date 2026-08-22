@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fin & Hook — Fish Avoidance Game</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="game-wrap">
+    <div id="hud">
+      <div class="hud-item">Score: <span id="score">0</span></div>
+      <div class="hud-item">High Score: <span id="high-score">0</span></div>
+      <div class="hud-item">Level: <span id="level">1</span></div>
+    </div>
+
+    <div id="active-effects"></div>
+
+    <canvas id="game-canvas" width="800" height="600"></canvas>
+
+    <div id="overlay" class="screen">
+      <h1>Fin &amp; Hook</h1>
+      <p>Guide your fish through open water and dodge the hooks!</p>
+      <p class="hint">Move: Arrow Keys / WASD &nbsp;•&nbsp; Pause: P</p>
+      <p class="hint">Grab <span class="good">green</span> power-ups, avoid <span class="bad">red</span> power-downs.</p>
+      <button id="start-btn">Start Game</button>
+    </div>
+
+    <div id="game-over" class="screen hidden">
+      <h1>Caught!</h1>
+      <p>Final Score: <span id="final-score">0</span></p>
+      <p id="new-high-msg" class="new-high hidden">New High Score!</p>
+      <p>High Score: <span id="final-high-score">0</span></p>
+      <button id="restart-btn">Play Again</button>
+    </div>
+
+    <div id="pause-screen" class="screen hidden">
+      <h1>Paused</h1>
+      <p class="hint">Press P to resume</p>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
