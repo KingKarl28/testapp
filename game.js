@@ -1,5 +1,8 @@
 /* ===================== Fin & Hook =====================
- * A fish has to swim around and avoid fishing hooks. The
+ * A fish has to swim around and avoid fishing hooks while
+ * chasing a glowing pearl objective that keeps relocating.
+ * Reaching it before its timer runs out builds a streak that
+ * multiplies your score — so standing still costs you. The
  * game gets progressively harder over time, and the player
  * can grab power-ups (helpful) or accidentally hit
  * power-downs (harmful).
@@ -14,6 +17,7 @@
   const scoreEl = document.getElementById('score');
   const highScoreEl = document.getElementById('high-score');
   const levelEl = document.getElementById('level');
+  const streakEl = document.getElementById('streak');
   const effectsEl = document.getElementById('active-effects');
 
   const overlay = document.getElementById('overlay');
@@ -74,6 +78,16 @@
   const rand = (min, max) => Math.random() * (max - min) + min;
   const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
   const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+
+  function hexToRgba(hex, alpha) {
+    const h = hex.replace('#', '');
+    const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+    const num = parseInt(full, 16);
+    const r = (num >> 16) & 255;
+    const g = (num >> 8) & 255;
+    const b = num & 255;
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
 
   /* --------------------------- Fish -------------------------------- */
   class Fish {
@@ -248,32 +262,243 @@
     }
   }
 
+  /* ------------------------- Objective ------------------------------- */
+  // A relocating waypoint the fish must keep reaching before its ring
+  // empties. Reaching it builds a streak (and a score multiplier);
+  // letting it expire resets the streak. This is what forces the fish
+  // to always be swimming toward something instead of camping safely.
+  class Objective {
+    constructor(x, y, timeLimit) {
+      this.x = x;
+      this.y = y;
+      this.radius = 13;
+      this.timeLimit = timeLimit;
+      this.timeLeft = timeLimit;
+      this.pulse = rand(0, Math.PI * 2);
+    }
+
+    update(dt) {
+      this.timeLeft -= dt;
+      this.pulse += dt;
+    }
+
+    draw(ctx) {
+      const frac = clamp(this.timeLeft / this.timeLimit, 0, 1);
+      const ringColor = frac > 0.5 ? '#6dffb0' : frac > 0.25 ? '#ffd76d' : '#ff6b6b';
+      const bob = Math.sin(this.pulse * 3) * 3;
+      const cx = this.x;
+      const cy = this.y + bob;
+
+      // outer glow, pulsing with urgency
+      const glowR = this.radius * (2.6 + (1 - frac) * 0.8);
+      const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+      glow.addColorStop(0, hexToRgba(ringColor, 0.4));
+      glow.addColorStop(1, hexToRgba(ringColor, 0));
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(cx, cy, glowR, 0, Math.PI * 2);
+      ctx.fill();
+
+      // background track ring
+      ctx.beginPath();
+      ctx.arc(cx, cy, this.radius + 6, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      // countdown ring
+      ctx.beginPath();
+      ctx.arc(cx, cy, this.radius + 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac);
+      ctx.strokeStyle = ringColor;
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+
+      // pearl core
+      const coreGrad = ctx.createRadialGradient(cx - 4, cy - 4, 1, cx, cy, this.radius);
+      coreGrad.addColorStop(0, '#ffffff');
+      coreGrad.addColorStop(0.5, '#ffe9b8');
+      coreGrad.addColorStop(1, '#f2c66d');
+      ctx.beginPath();
+      ctx.arc(cx, cy, this.radius, 0, Math.PI * 2);
+      ctx.fillStyle = coreGrad;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // rotating sparkle cross
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(this.pulse * 2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-4, 0); ctx.lineTo(4, 0);
+      ctx.moveTo(0, -4); ctx.lineTo(0, 4);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
   /* -------------------------- Pickups -------------------------------- */
   const PICKUP_TYPES = [
-    { key: 'shield', good: true, color: '#6dffb0', symbol: 'S', label: 'Shield' },
-    { key: 'slowmo', good: true, color: '#7bd6ff', symbol: 'Z', label: 'Slow-Mo' },
-    { key: 'star', good: true, color: '#ffe066', symbol: '+', label: 'Bonus' },
-    { key: 'speedy', good: true, color: '#c58bff', symbol: '>', label: 'Speed Up' },
-    { key: 'reverse', good: false, color: '#ff7b7b', symbol: 'R', label: 'Reversed!' },
-    { key: 'heavy', good: false, color: '#b5651d', symbol: 'A', label: 'Weighed Down!' },
-    { key: 'ink', good: false, color: '#7a4fb5', symbol: 'I', label: 'Inked!' },
+    { key: 'shield', good: true, color: '#6dffb0', label: 'Shield' },
+    { key: 'slowmo', good: true, color: '#7bd6ff', label: 'Slow-Mo' },
+    { key: 'star', good: true, color: '#ffe066', label: 'Bonus' },
+    { key: 'speedy', good: true, color: '#c58bff', label: 'Speed Up' },
+    { key: 'reverse', good: false, color: '#ff7b7b', label: 'Reversed!' },
+    { key: 'heavy', good: false, color: '#b5651d', label: 'Weighed Down!' },
+    { key: 'ink', good: false, color: '#7a4fb5', label: 'Inked!' },
   ];
+
+  // Vector icon for each pickup type, drawn centered at the origin so it
+  // can be layered on top of the glowing core disc.
+  function drawPickupIcon(ctx, key, age, spin) {
+    ctx.save();
+    ctx.strokeStyle = '#0b2430';
+    ctx.fillStyle = '#0b2430';
+    ctx.lineWidth = 1.8;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    switch (key) {
+      case 'shield': {
+        ctx.beginPath();
+        ctx.moveTo(0, -8);
+        ctx.lineTo(6.5, -5);
+        ctx.lineTo(6.5, 2);
+        ctx.quadraticCurveTo(6.5, 7, 0, 9.5);
+        ctx.quadraticCurveTo(-6.5, 7, -6.5, 2);
+        ctx.lineTo(-6.5, -5);
+        ctx.closePath();
+        ctx.globalAlpha = 0.2;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.stroke();
+        break;
+      }
+      case 'slowmo': {
+        ctx.beginPath();
+        ctx.arc(0, 0, 7.5, 0, Math.PI * 2);
+        ctx.stroke();
+        const hourAngle = age * 0.6;
+        const minAngle = age * 2.2;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(hourAngle) * 3.5, Math.sin(hourAngle) * 3.5);
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(minAngle) * 5.5, Math.sin(minAngle) * 5.5);
+        ctx.stroke();
+        break;
+      }
+      case 'star': {
+        ctx.rotate(spin * 0.4);
+        ctx.beginPath();
+        const spikes = 5;
+        const outer = 8;
+        const inner = 3.4;
+        for (let i = 0; i < spikes * 2; i++) {
+          const r = i % 2 === 0 ? outer : inner;
+          const a = (Math.PI / spikes) * i - Math.PI / 2;
+          const px = Math.cos(a) * r;
+          const py = Math.sin(a) * r;
+          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+        break;
+      }
+      case 'speedy': {
+        ctx.beginPath();
+        ctx.moveTo(1.5, -9);
+        ctx.lineTo(-4, -0.5);
+        ctx.lineTo(-0.5, -0.5);
+        ctx.lineTo(-2.5, 9);
+        ctx.lineTo(5, -2);
+        ctx.lineTo(1, -2);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      }
+      case 'reverse': {
+        ctx.rotate(spin);
+        ctx.beginPath();
+        ctx.arc(0, 0, 6, 0.4, Math.PI - 0.4);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(0, 0, 6, Math.PI + 0.4, Math.PI * 2 - 0.4);
+        ctx.stroke();
+        const a1 = Math.PI - 0.4;
+        const p1x = Math.cos(a1) * 6;
+        const p1y = Math.sin(a1) * 6;
+        ctx.beginPath();
+        ctx.moveTo(p1x, p1y);
+        ctx.lineTo(p1x - 3, p1y - 1);
+        ctx.lineTo(p1x - 1, p1y + 3);
+        ctx.closePath();
+        ctx.fill();
+        const a2 = Math.PI * 2 - 0.4;
+        const p2x = Math.cos(a2) * 6;
+        const p2y = Math.sin(a2) * 6;
+        ctx.beginPath();
+        ctx.moveTo(p2x, p2y);
+        ctx.lineTo(p2x + 3, p2y + 1);
+        ctx.lineTo(p2x + 1, p2y - 3);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      }
+      case 'heavy': {
+        ctx.beginPath();
+        ctx.arc(0, -6, 2, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, -4);
+        ctx.lineTo(0, 7);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-5, -1);
+        ctx.lineTo(5, -1);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(0, 3, 5, 0.2, Math.PI - 0.2);
+        ctx.stroke();
+        break;
+      }
+      case 'ink': {
+        ctx.beginPath();
+        ctx.moveTo(0, -8);
+        ctx.bezierCurveTo(6, -1, 6, 5, 0, 8);
+        ctx.bezierCurveTo(-6, 5, -6, -1, 0, -8);
+        ctx.closePath();
+        ctx.globalAlpha = 0.85;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        break;
+      }
+    }
+    ctx.restore();
+  }
 
   class Pickup {
     constructor() {
       const type = PICKUP_TYPES[Math.floor(rand(0, PICKUP_TYPES.length))];
       this.type = type;
-      this.radius = 14;
+      this.radius = 15;
       this.x = rand(this.radius * 2, W - this.radius * 2);
       this.y = rand(this.radius * 2, H - this.radius * 2);
       this.age = 0;
       this.lifespan = rand(7, 11);
       this.bob = rand(0, Math.PI * 2);
+      this.spin = rand(0, Math.PI * 2);
+      this.spinDir = type.good ? 1 : -1;
     }
 
     update(dt) {
       this.age += dt;
       this.bob += dt * 3;
+      this.spin += dt * this.spinDir * 0.8;
     }
 
     get expired() {
@@ -283,19 +508,53 @@
     draw(ctx) {
       const fade = this.age > this.lifespan - 2 ? Math.max(0, (this.lifespan - this.age) / 2) : 1;
       const yOff = Math.sin(this.bob) * 4;
+      const pulse = 1 + Math.sin(this.bob * 1.3) * 0.08;
+      const cx = this.x;
+      const cy = this.y + yOff;
+
       ctx.save();
       ctx.globalAlpha = fade;
+
+      // outer glow
+      const glowR = this.radius * 2.4;
+      const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+      glow.addColorStop(0, hexToRgba(this.type.color, 0.35));
+      glow.addColorStop(1, hexToRgba(this.type.color, 0));
+      ctx.fillStyle = glow;
       ctx.beginPath();
-      ctx.arc(this.x, this.y + yOff, this.radius, 0, Math.PI * 2);
-      ctx.fillStyle = this.type.color;
+      ctx.arc(cx, cy, glowR, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+
+      // rotating dashed ring — spins one way for good, the other for bad
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(this.spin);
+      ctx.setLineDash([4, 5]);
+      ctx.beginPath();
+      ctx.arc(0, 0, this.radius + 5, 0, Math.PI * 2);
+      ctx.strokeStyle = hexToRgba(this.type.color, 0.7);
+      ctx.lineWidth = 1.5;
       ctx.stroke();
-      ctx.fillStyle = '#022';
-      ctx.font = 'bold 14px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(this.type.symbol, this.x, this.y + yOff + 1);
+      ctx.restore();
+
+      // core disc with a soft highlight
+      ctx.beginPath();
+      ctx.arc(cx, cy, this.radius * pulse, 0, Math.PI * 2);
+      const coreGrad = ctx.createRadialGradient(cx - 4, cy - 5, 1, cx, cy, this.radius * pulse);
+      coreGrad.addColorStop(0, '#ffffff');
+      coreGrad.addColorStop(0.35, this.type.color);
+      coreGrad.addColorStop(1, hexToRgba(this.type.color, 0.85));
+      ctx.fillStyle = coreGrad;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // themed icon on top
+      ctx.translate(cx, cy);
+      ctx.scale(pulse, pulse);
+      drawPickupIcon(ctx, this.type.key, this.age, this.spin);
+
       ctx.restore();
     }
 
@@ -319,6 +578,7 @@
       this.fish = new Fish();
       this.hooks = [];
       this.pickups = [];
+      this.popups = [];
       this.reset();
     }
 
@@ -326,9 +586,12 @@
       this.fish.reset();
       this.hooks = [];
       this.pickups = [];
+      this.popups = [];
       this.elapsed = 0;
       this.score = 0;
       this.level = 1;
+      this.streak = 0;
+      this.combo = 1;
       this.pickupTimer = rand(2, 4);
       this.effects = {
         shield: 0,
@@ -344,10 +607,30 @@
       for (let i = 0; i < this.targetHookCount(); i++) {
         this.hooks.push(new Hook(this.level));
       }
+      this.spawnObjective();
     }
 
     targetHookCount() {
       return Math.min(3 + this.level, 14);
+    }
+
+    spawnObjective() {
+      const minDist = 160;
+      const pad = 40;
+      let x = rand(pad, W - pad);
+      let y = rand(pad, H - pad);
+      let tries = 0;
+      while (dist(x, y, this.fish.x, this.fish.y) < minDist && tries < 20) {
+        x = rand(pad, W - pad);
+        y = rand(pad, H - pad);
+        tries++;
+      }
+      const timeLimit = clamp(7.5 - this.level * 0.3, 3, 7.5);
+      this.objective = new Objective(x, y, timeLimit);
+    }
+
+    addPopup(x, y, text, color) {
+      this.popups.push({ x, y, text, color, life: 1 });
     }
 
     start() {
@@ -389,7 +672,7 @@
 
       this.elapsed += dt;
       this.level = 1 + Math.floor(this.elapsed / 15);
-      this.score += dt * 10 * (1 + (this.level - 1) * 0.15);
+      this.score += dt * 10 * (1 + (this.level - 1) * 0.15) * this.combo;
 
       // tick down timed effects
       for (const key of Object.keys(this.effects)) {
@@ -412,6 +695,32 @@
           return;
         }
       }
+
+      // chase-the-pearl objective: reaching it in time builds a streak
+      // (and a score multiplier); letting it time out resets the streak.
+      if (this.objective) {
+        this.objective.update(dt);
+        if (dist(this.fish.x, this.fish.y, this.objective.x, this.objective.y)
+            < this.objective.radius + this.fish.radius * 0.8) {
+          const frac = clamp(this.objective.timeLeft / this.objective.timeLimit, 0, 1);
+          const reward = 25 + Math.round(35 * frac) + this.streak * 5;
+          this.score += reward;
+          this.streak += 1;
+          this.combo = clamp(1 + this.streak * 0.08, 1, 3);
+          this.addPopup(this.objective.x, this.objective.y, `+${reward}`, '#ffe9b8');
+          this.spawnObjective();
+        } else if (this.objective.timeLeft <= 0) {
+          this.streak = 0;
+          this.combo = 1;
+          this.spawnObjective();
+        }
+      }
+
+      for (const p of this.popups) {
+        p.life -= dt * 0.8;
+        p.y -= dt * 30;
+      }
+      this.popups = this.popups.filter((p) => p.life > 0);
 
       this.pickupTimer -= dt;
       if (this.pickupTimer <= 0) {
@@ -443,9 +752,20 @@
     draw(ctx) {
       ctx.clearRect(0, 0, W, H);
 
+      if (this.objective) this.objective.draw(ctx);
       for (const pickup of this.pickups) pickup.draw(ctx);
       for (const hook of this.hooks) hook.draw(ctx);
       this.fish.draw(ctx, this.effects);
+
+      for (const p of this.popups) {
+        ctx.save();
+        ctx.globalAlpha = clamp(p.life, 0, 1);
+        ctx.fillStyle = p.color;
+        ctx.font = 'bold 15px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(p.text, p.x, p.y);
+        ctx.restore();
+      }
 
       if (this.effects.ink > 0) {
         const gradient = ctx.createRadialGradient(
@@ -463,6 +783,7 @@
       scoreEl.textContent = Math.floor(this.score);
       highScoreEl.textContent = getHighScore();
       levelEl.textContent = this.level;
+      if (streakEl) streakEl.textContent = `${this.streak} (x${this.combo.toFixed(1)})`;
 
       effectsEl.innerHTML = '';
       const labels = {
