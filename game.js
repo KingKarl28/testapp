@@ -1027,3 +1027,14 @@
   }
   requestAnimationFrame(loop);
 })();
+
+// Register the service worker so the game keeps working offline and can
+// be installed as a PWA. Skipped on file:// (no origin to scope to) and
+// wrapped in a feature check since this file is also embedded standalone.
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {
+      // offline-first support is a nice-to-have; the game still works without it
+    });
+  });
+}
