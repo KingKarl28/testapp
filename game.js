@@ -18,6 +18,7 @@
   const highScoreEl = document.getElementById('high-score');
   const levelEl = document.getElementById('level');
   const streakEl = document.getElementById('streak');
+  const missesEl = document.getElementById('misses');
   const effectsEl = document.getElementById('active-effects');
 
   const overlay = document.getElementById('overlay');
@@ -161,10 +162,11 @@
       this.wobble += dt * 10;
     }
 
-    draw(ctx, effects) {
+    draw(ctx, effects, tilt = 0, hooked = false) {
       ctx.save();
       ctx.translate(this.x, this.y);
       ctx.scale(this.facing, 1);
+      ctx.rotate(this.facing * tilt);
 
       if (effects.shield > 0) {
         ctx.beginPath();
@@ -174,7 +176,7 @@
         ctx.stroke();
       }
 
-      const tailWag = Math.sin(this.wobble) * 0.35;
+      const tailWag = Math.sin(this.wobble) * (hooked ? 0.8 : 0.35);
 
       // tail
       ctx.beginPath();
@@ -196,8 +198,19 @@
       // eye
       ctx.beginPath();
       ctx.arc(this.radius * 0.45, -this.radius * 0.15, 2.6, 0, Math.PI * 2);
-      ctx.fillStyle = '#1a1a1a';
+      ctx.fillStyle = hooked ? '#3a0d0d' : '#1a1a1a';
       ctx.fill();
+
+      if (hooked) {
+        // the hook caught in its mouth, and the line running up off-frame
+        ctx.beginPath();
+        ctx.moveTo(this.radius * 0.9, 0);
+        ctx.lineTo(this.radius * 0.9, -12);
+        ctx.arc(this.radius * 0.9, -14, 2.5, Math.PI / 2, Math.PI * 1.6, true);
+        ctx.strokeStyle = '#d8d8d8';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
 
       ctx.restore();
     }
@@ -260,6 +273,42 @@
     collides(fish) {
       return dist(this.x, this.y, fish.x, fish.y) < this.radius + fish.radius * 0.8;
     }
+  }
+
+  // The boat lurking at the surface, revealed when a hook reels the fish
+  // in. Drawn from below the waterline looking up at its hull.
+  function drawBoat(ctx, alpha) {
+    if (alpha <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    ctx.beginPath();
+    ctx.moveTo(0, -30);
+    ctx.lineTo(W, -30);
+    ctx.lineTo(W * 0.82, 34);
+    ctx.quadraticCurveTo(W / 2, 58, W * 0.18, 34);
+    ctx.closePath();
+    const hullGrad = ctx.createLinearGradient(0, -30, 0, 58);
+    hullGrad.addColorStop(0, '#4a2f18');
+    hullGrad.addColorStop(1, '#2a1a0d');
+    ctx.fillStyle = hullGrad;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // plank lines
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+    ctx.lineWidth = 1;
+    for (let i = 1; i <= 3; i++) {
+      const t = i / 4;
+      ctx.beginPath();
+      ctx.moveTo(W * t, -30);
+      ctx.quadraticCurveTo(W / 2, 50 * (1 - Math.abs(t - 0.5) * 1.6), W * t, -30);
+      ctx.stroke();
+    }
+
+    ctx.restore();
   }
 
   /* ------------------------- Objective ------------------------------- */
@@ -481,9 +530,22 @@
     ctx.restore();
   }
 
+  // Power-downs spawn 1.5x as often as power-ups: each bad type carries
+  // 1.5x the pick weight of a good one in the shared pickup pool.
+  function pickPickupType() {
+    const weights = PICKUP_TYPES.map((t) => (t.good ? 1 : 1.5));
+    const total = weights.reduce((a, b) => a + b, 0);
+    let r = rand(0, total);
+    for (let i = 0; i < PICKUP_TYPES.length; i++) {
+      if (r < weights[i]) return PICKUP_TYPES[i];
+      r -= weights[i];
+    }
+    return PICKUP_TYPES[PICKUP_TYPES.length - 1];
+  }
+
   class Pickup {
     constructor() {
-      const type = PICKUP_TYPES[Math.floor(rand(0, PICKUP_TYPES.length))];
+      const type = pickPickupType();
       this.type = type;
       this.radius = 15;
       this.x = rand(this.radius * 2, W - this.radius * 2);
@@ -564,13 +626,15 @@
   }
 
   /* ---------------------------- Game ---------------------------------- */
+  // Power-downs last 3x as long as power-ups, so a single mistake really
+  // costs you while the helpful effects stay short bursts.
   const EFFECT_DURATIONS = {
     shield: 5,
     slowmo: 6,
     speedBoost: 6,
-    controlsReversed: 5,
-    slowed: 5,
-    ink: 5,
+    controlsReversed: 15,
+    slowed: 15,
+    ink: 15,
   };
 
   class Game {
@@ -592,6 +656,7 @@
       this.level = 1;
       this.streak = 0;
       this.combo = 1;
+      this.pearlMisses = 0;
       this.pickupTimer = rand(2, 4);
       this.effects = {
         shield: 0,
@@ -604,6 +669,9 @@
       this.running = false;
       this.paused = false;
       this.gameOver = false;
+      this.dying = false;
+      this.deathSeq = null;
+      this.deathReason = 'caught';
       for (let i = 0; i < this.targetHookCount(); i++) {
         this.hooks.push(new Hook(this.level));
       }
@@ -667,7 +735,89 @@
       }
     }
 
+    // The fish gets yanked straight up along the culprit hook's line and
+    // disappears into the boat lurking at the surface. The rest of the
+    // world freezes while this plays out so nothing else can kill the
+    // fish mid-animation.
+    startDeath(hook) {
+      this.dying = true;
+      this.deathReason = 'caught';
+      this.deathSeq = {
+        t: 0,
+        riseDuration: 1.0,
+        settleDuration: 0.9,
+        startX: this.fish.x,
+        startY: this.fish.y,
+        targetX: hook.anchorX,
+        hook,
+      };
+    }
+
+    updateDeath(dt) {
+      const d = this.deathSeq;
+      d.t += dt;
+      this.fish.wobble += dt * 26;
+
+      if (d.t <= d.riseDuration) {
+        const f = d.t / d.riseDuration;
+        const ease = f * f * (3 - 2 * f);
+        this.fish.x = d.startX + (d.targetX - d.startX) * ease;
+        this.fish.y = d.startY + (-34 - d.startY) * ease;
+      }
+
+      if (d.t >= d.riseDuration + d.settleDuration) {
+        this.finishDeath();
+      }
+    }
+
+    finishDeath() {
+      this.dying = false;
+      this.deathSeq = null;
+      this.endGame();
+    }
+
+    drawDeath(ctx) {
+      const d = this.deathSeq;
+      const riseFrac = clamp(d.t / d.riseDuration, 0, 1);
+      const boatAlpha = clamp((d.t - d.riseDuration * 0.25) / (d.riseDuration * 0.75), 0, 1);
+
+      drawBoat(ctx, boatAlpha);
+
+      if (boatAlpha > 0) {
+        ctx.beginPath();
+        ctx.moveTo(d.targetX, -30);
+        ctx.lineTo(d.targetX, 0);
+        ctx.strokeStyle = 'rgba(230,240,255,0.6)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+
+      const tilt = -(Math.PI / 2) * riseFrac + Math.sin(d.t * 15) * 0.18 * riseFrac;
+      this.fish.draw(ctx, this.effects, tilt, true);
+
+      // splash rings once the fish breaks the surface
+      const sinceSplash = d.t - d.riseDuration * 0.85;
+      if (sinceSplash > 0) {
+        for (let i = 0; i < 3; i++) {
+          const rt = sinceSplash - i * 0.12;
+          if (rt <= 0) continue;
+          const alpha = clamp(1 - rt / 0.6, 0, 1) * 0.6;
+          if (alpha <= 0) continue;
+          const r = 6 + rt * 90;
+          ctx.beginPath();
+          ctx.ellipse(d.targetX, 0, r, r * 0.35, 0, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(220,240,255,${alpha})`;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      }
+    }
+
     update(dt) {
+      if (this.dying) {
+        this.updateDeath(dt);
+        return;
+      }
       if (!this.running || this.paused || this.gameOver) return;
 
       this.elapsed += dt;
@@ -691,7 +841,7 @@
       for (const hook of this.hooks) {
         hook.update(dt, this.level, slowFactor);
         if (this.effects.shield <= 0 && hook.collides(this.fish)) {
-          this.endGame();
+          this.startDeath(hook);
           return;
         }
       }
@@ -706,12 +856,20 @@
           const reward = 25 + Math.round(35 * frac) + this.streak * 5;
           this.score += reward;
           this.streak += 1;
+          this.pearlMisses = 0;
           this.combo = clamp(1 + this.streak * 0.08, 1, 3);
           this.addPopup(this.objective.x, this.objective.y, `+${reward}`, '#ffe9b8');
           this.spawnObjective();
         } else if (this.objective.timeLeft <= 0) {
           this.streak = 0;
           this.combo = 1;
+          this.pearlMisses += 1;
+          if (this.pearlMisses >= 3) {
+            this.deathReason = 'exhausted';
+            this.endGame();
+            return;
+          }
+          this.addPopup(this.objective.x, this.objective.y, 'Missed!', '#ff6b6b');
           this.spawnObjective();
         }
       }
@@ -741,6 +899,10 @@
     endGame() {
       this.gameOver = true;
       this.running = false;
+      const titleEl = gameOverScreen.querySelector('h1');
+      if (titleEl) {
+        titleEl.textContent = this.deathReason === 'exhausted' ? 'Exhausted!' : 'Caught!';
+      }
       const finalScore = Math.floor(this.score);
       const isNewHigh = setHighScore(finalScore);
       finalScoreEl.textContent = finalScore;
@@ -754,8 +916,16 @@
 
       if (this.objective) this.objective.draw(ctx);
       for (const pickup of this.pickups) pickup.draw(ctx);
-      for (const hook of this.hooks) hook.draw(ctx);
-      this.fish.draw(ctx, this.effects);
+      for (const hook of this.hooks) {
+        if (this.dying && hook === this.deathSeq.hook) continue;
+        hook.draw(ctx);
+      }
+
+      if (this.dying) {
+        this.drawDeath(ctx);
+      } else {
+        this.fish.draw(ctx, this.effects);
+      }
 
       for (const p of this.popups) {
         ctx.save();
@@ -784,6 +954,7 @@
       highScoreEl.textContent = getHighScore();
       levelEl.textContent = this.level;
       if (streakEl) streakEl.textContent = `${this.streak} (x${this.combo.toFixed(1)})`;
+      if (missesEl) missesEl.textContent = `${this.pearlMisses}/3`;
 
       effectsEl.innerHTML = '';
       const labels = {
