@@ -1,6 +1,6 @@
 /* ===================== Fin & Hook =====================
  * A fish has to swim around and avoid fishing hooks while
- * chasing a glowing pearl objective that keeps relocating.
+ * chasing a drifting shrimp that keeps relocating.
  * Reaching it before its timer runs out builds a streak that
  * multiplies your score — so standing still costs you. The
  * game gets progressively harder over time, and the player
@@ -312,7 +312,7 @@
   }
 
   /* ------------------------- Objective ------------------------------- */
-  // A relocating waypoint the fish must keep reaching before its ring
+  // A relocating shrimp the fish must keep catching before its ring
   // empties. Reaching it builds a streak (and a score multiplier);
   // letting it expire resets the streak. This is what forces the fish
   // to always be swimming toward something instead of camping safely.
@@ -363,29 +363,53 @@
       ctx.lineCap = 'round';
       ctx.stroke();
 
-      // pearl core
-      const coreGrad = ctx.createRadialGradient(cx - 4, cy - 4, 1, cx, cy, this.radius);
-      coreGrad.addColorStop(0, '#ffffff');
-      coreGrad.addColorStop(0.5, '#ffe9b8');
-      coreGrad.addColorStop(1, '#f2c66d');
-      ctx.beginPath();
-      ctx.arc(cx, cy, this.radius, 0, Math.PI * 2);
-      ctx.fillStyle = coreGrad;
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      // rotating sparkle cross
+      // a small shrimp, wriggling in place — actual fish food, rather
+      // than an inedible pearl
       ctx.save();
       ctx.translate(cx, cy);
-      ctx.rotate(this.pulse * 2);
-      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-      ctx.lineWidth = 1;
+      ctx.rotate(Math.sin(this.pulse * 2.4) * 0.2);
+
+      // tail fan
       ctx.beginPath();
-      ctx.moveTo(-4, 0); ctx.lineTo(4, 0);
-      ctx.moveTo(0, -4); ctx.lineTo(0, 4);
+      ctx.moveTo(-9, 5);
+      ctx.lineTo(-14, 1);
+      ctx.lineTo(-14, 9);
+      ctx.closePath();
+      ctx.fillStyle = '#ff9d85';
+      ctx.fill();
+
+      // curled body
+      ctx.beginPath();
+      ctx.moveTo(-9, 5);
+      ctx.quadraticCurveTo(-3, -9, 7, -3);
+      ctx.quadraticCurveTo(10, 0, 8, 3);
+      ctx.quadraticCurveTo(-1, 5, -9, 5);
+      ctx.closePath();
+      const bodyGrad = ctx.createLinearGradient(-9, -8, 8, 4);
+      bodyGrad.addColorStop(0, '#ffb199');
+      bodyGrad.addColorStop(1, '#ff7f61');
+      ctx.fillStyle = bodyGrad;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(140,35,20,0.45)';
+      ctx.lineWidth = 0.8;
       ctx.stroke();
+
+      // eye
+      ctx.beginPath();
+      ctx.arc(6, -3, 1.2, 0, Math.PI * 2);
+      ctx.fillStyle = '#2a0f08';
+      ctx.fill();
+
+      // antennae
+      ctx.beginPath();
+      ctx.moveTo(7, -3.5);
+      ctx.quadraticCurveTo(12, -8, 15, -6);
+      ctx.moveTo(7, -3.5);
+      ctx.quadraticCurveTo(11, -10, 14, -12);
+      ctx.strokeStyle = 'rgba(140,35,20,0.5)';
+      ctx.lineWidth = 0.7;
+      ctx.stroke();
+
       ctx.restore();
     }
   }
@@ -530,13 +554,15 @@
     ctx.restore();
   }
 
-  // Power-ups and power-downs spawn equally often overall (50/50 by
+  // Power-downs spawn more often than power-ups overall (1.5x by
   // category), regardless of how many types are in each — each type's
-  // weight is normalized by its category size so the categories balance.
+  // weight is normalized by its category size so the category totals
+  // land at that ratio no matter how many types are in either bucket.
   const GOOD_TYPE_COUNT = PICKUP_TYPES.filter((t) => t.good).length;
   const BAD_TYPE_COUNT = PICKUP_TYPES.length - GOOD_TYPE_COUNT;
+  const BAD_SPAWN_BIAS = 1.5;
   function pickPickupType() {
-    const weights = PICKUP_TYPES.map((t) => (t.good ? 1 / GOOD_TYPE_COUNT : 1 / BAD_TYPE_COUNT));
+    const weights = PICKUP_TYPES.map((t) => (t.good ? 1 / GOOD_TYPE_COUNT : BAD_SPAWN_BIAS / BAD_TYPE_COUNT));
     const total = weights.reduce((a, b) => a + b, 0);
     let r = rand(0, total);
     for (let i = 0; i < PICKUP_TYPES.length; i++) {
@@ -667,7 +693,7 @@
       this.level = 1;
       this.streak = 0;
       this.combo = 1;
-      this.pearlMisses = 0;
+      this.missedBites = 0;
       this.pickupTimer = rand(2, 4);
       this.effects = {
         shield: 0,
@@ -704,7 +730,7 @@
         y = rand(pad, H - pad);
         tries++;
       }
-      // Pearls start out forgiving, then ramp up faster and faster —
+      // The shrimp starts out forgiving, then ramps up faster and faster —
       // the quadratic term barely matters early but dominates late.
       const lvl = this.level;
       const timeLimit = clamp(7.5 - lvl * 0.25 - lvl * lvl * 0.015, 2.5, 7.5);
@@ -860,8 +886,10 @@
         }
       }
 
-      // chase-the-pearl objective: reaching it in time builds a streak
-      // (and a score multiplier); letting it time out resets the streak.
+      // chase-the-shrimp objective: reaching it in time builds a streak
+      // (and a score multiplier); letting it time out resets the streak
+      // and counts toward a lifetime miss limit — 2 missed bites over the
+      // whole run ends it, whether or not they were back-to-back.
       if (this.objective) {
         this.objective.update(dt);
         if (dist(this.fish.x, this.fish.y, this.objective.x, this.objective.y)
@@ -870,15 +898,14 @@
           const reward = 25 + Math.round(35 * frac) + this.streak * 5;
           this.score += reward;
           this.streak += 1;
-          this.pearlMisses = 0;
           this.combo = clamp(1 + this.streak * 0.08, 1, 3);
           this.addPopup(this.objective.x, this.objective.y, `+${reward}`, '#ffe9b8');
           this.spawnObjective();
         } else if (this.objective.timeLeft <= 0) {
           this.streak = 0;
           this.combo = 1;
-          this.pearlMisses += 1;
-          if (this.pearlMisses >= 2) {
+          this.missedBites += 1;
+          if (this.missedBites >= 2) {
             this.deathReason = 'exhausted';
             this.endGame();
             return;
@@ -979,7 +1006,7 @@
       highScoreEl.textContent = getHighScore();
       levelEl.textContent = this.level;
       if (streakEl) streakEl.textContent = `${this.streak} (x${this.combo.toFixed(1)})`;
-      if (missesEl) missesEl.textContent = `${this.pearlMisses}/2`;
+      if (missesEl) missesEl.textContent = `${this.missedBites}/2`;
 
       effectsEl.innerHTML = '';
       const labels = {
